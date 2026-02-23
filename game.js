@@ -6,21 +6,30 @@ const ctx = canvas.getContext('2d');
 const W = 800, H = 500, PX = 3;
 
 // ── STATE ──
-let gameState = 'title'; // title|charSelect|playing|gameover|enterInitials|waveIntro
+let gameState = 'title'; // title|charSelect|playing|gameover|enterInitials|waveIntro|scores
 let score = 0, wave = 0, waveTimer = 0;
-let turtlesRemaining = 0, turtlesToSpawn = 0, spawnTimer = 0, spawnInterval = 140;
+let turtlesRemaining = 0, turtlesToSpawn = 0, spawnTimer = 0, spawnInterval = 120;
 let bloodPools = [], enemies = [], projectiles = [], powerups = [], particles = [];
+let seagulls = [], poopDrops = [], manatees = [], lasers = [];
+let seagullSpawnTimer = 0, manateeSpawnTimer = 0;
 let shakeTimer = 0, shakeIntensity = 0, flashTimer = 0, hitStopTimer = 0;
 let groundY = H - 70;
 let comboCount = 0, comboTimer = 0;
 let selectedChar = 0; // 0=hopper 1=pipeline 2=clamshell
 let charNames = ['HOPPER DREDGE', 'PIPELINE DREDGE', 'CLAMSHELL DREDGE'];
 let charDescs = ['TRAILING SUCTION ARMS', 'ROTATING CUTTER HEAD', 'SWINGING BUCKET CRANE'];
+let bgTheme = 0;
+const BG_THEMES = [
+    { name: 'DOCK', sky1: '#1a1a3f', sky2: '#2a2a5f', sky3: '#3a4a7f', water: '#2a4a8f', waveC: '#3a5a9f', ground: '#5a4a3a', groundL: '#6a5a4a', groundD: '#4a3a2a' },
+    { name: 'BEACH', sky1: '#2a1a0a', sky2: '#cc7722', sky3: '#ee9944', water: '#1a6a9a', waveC: '#2a8abb', ground: '#ddc47a', groundL: '#eedd99', groundD: '#bbaa66' },
+    { name: 'CONSTRUCTION', sky1: '#1a1a2a', sky2: '#333350', sky3: '#4a4a6a', water: '#2a3a5a', waveC: '#3a4a6a', ground: '#5a5a5a', groundL: '#6a6a6a', groundD: '#4a4a4a' },
+    { name: 'OPEN WATER', sky1: '#001a33', sky2: '#003366', sky3: '#004488', water: '#003a7a', waveC: '#1a5aaa', ground: '#334455', groundL: '#445566', groundD: '#223344' }
+];
 
 // ── SCOREBOARD ──
 let highScores = JSON.parse(localStorage.getItem('dredgeBrawlScores') || '[]');
 let initialsInput = '', initialsCursor = 0;
-const MAX_SCORES = 8;
+const MAX_SCORES = 10;
 function saveScores() { localStorage.setItem('dredgeBrawlScores', JSON.stringify(highScores)); }
 
 // ── AUDIO ──
@@ -110,7 +119,7 @@ function dpr(x, y, w, h, color) { ctx.fillStyle = color; for (let py = 0; py < h
 
 // ── PLAYER ──
 const player = {
-    x: 80, y: 0, w: 90, h: 48, speed: 3.8, lives: 3, invincible: 0,
+    x: 80, y: 0, w: 90, h: 48, speed: 3.8, lives: 3.0, invincible: 0,
     portPunch: 0, stbdPunch: 0, punchDuration: 16,
     portArm: { x: 0, y: 0, w: 0, h: 0 }, stbdArm: { x: 0, y: 0, w: 0, h: 0 }, walkFrame: 0
 };
@@ -244,10 +253,17 @@ function drawDredge(p) { [drawHopper, drawPipeline, drawClamshell][selectedChar]
 
 // ── TURTLE ──
 function spawnTurtle() {
+    const dirs = ['right', 'left', 'top', 'bottom'];
+    const dir = dirs[Math.floor(Math.random() * dirs.length)];
+    let sx, sy;
+    if (dir === 'right') { sx = W + 20 + Math.random() * 100; sy = groundY - 36 + Math.random() * 10; }
+    else if (dir === 'left') { sx = -60 - Math.random() * 60; sy = groundY - 36 + Math.random() * 10; }
+    else if (dir === 'top') { sx = 100 + Math.random() * (W - 200); sy = -50; }
+    else { sx = 100 + Math.random() * (W - 200); sy = groundY + 40; }
     enemies.push({
-        x: W + 20 + Math.random() * 100, y: groundY - 36 + Math.random() * 10, w: 40, h: 36,
-        speed: 0.25 + wave * 0.04 + Math.random() * 0.2, hp: 1,
-        attackType: Math.random() > 0.85 ? 'shell' : 'bite', attackCooldown: 180 + Math.random() * 100,
+        x: sx, y: sy, w: 40, h: 36, dir: dir,
+        speed: 0.4 + wave * 0.05 + Math.random() * 0.25, hp: 1,
+        attackType: Math.random() > 0.85 ? 'shell' : 'bite', attackCooldown: 160 + Math.random() * 80,
         attackTimer: 0, biting: 0, walkFrame: 0, dead: false
     });
 }
@@ -281,15 +297,85 @@ function drawWrench(p) {
     ctx.fillStyle = '#666'; ctx.fillRect(x + 3, y + 2 + b, 4, 5); ctx.fillRect(x + 11, y + 2 + b, 4, 5);
     if (Math.random() > 0.85) particles.push({ x: x + 9 + (Math.random() - 0.5) * 12, y: y + b + Math.random() * 10, vx: (Math.random() - 0.5), vy: -1 - Math.random(), life: 15, color: '#ff0', size: 3, type: 'sparkle' });
 }
-function drawHardhat(x, y, filled) {
-    ctx.fillStyle = filled ? '#ddaa22' : '#444'; ctx.fillRect(x + 2, y + 4, 20, 10); ctx.fillRect(x + 4, y, 16, 6);
-    ctx.fillStyle = filled ? '#bb8811' : '#333'; ctx.fillRect(x, y + 14, 24, 4);
+function drawHardhat(x, y, filled, half) {
+    ctx.fillStyle = filled ? '#ddaa22' : (half ? '#997711' : '#444');
+    ctx.fillRect(x + 2, y + 4, 20, 10); ctx.fillRect(x + 4, y, 16, 6);
+    ctx.fillStyle = filled ? '#bb8811' : (half ? '#775500' : '#333'); ctx.fillRect(x, y + 14, 24, 4);
     if (filled) { ctx.fillStyle = '#e33'; ctx.fillRect(x + 6, y + 2, 4, 4); ctx.fillRect(x + 13, y + 2, 4, 4); ctx.fillRect(x + 5, y + 4, 14, 4); ctx.fillRect(x + 7, y + 8, 10, 2); ctx.fillRect(x + 9, y + 10, 6, 2); }
+    if (half) { ctx.fillStyle = '#e33'; ctx.fillRect(x + 6, y + 2, 4, 4); ctx.fillRect(x + 5, y + 4, 7, 4); ctx.fillRect(x + 7, y + 8, 5, 2); ctx.fillRect(x + 9, y + 10, 3, 2); }
 }
 function drawBloodPool(bp) {
     ctx.globalAlpha = Math.min(1, bp.life / 30); ctx.fillStyle = '#8b0000';
     ctx.beginPath(); ctx.ellipse(bp.x, bp.y, bp.size * 1.5, bp.size * 0.5, 0, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = '#aa1111'; ctx.beginPath(); ctx.ellipse(bp.x + 3, bp.y - 1, bp.size * 0.8, bp.size * 0.3, 0.3, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1;
+}
+// ── SEAGULL ──
+function spawnSeagull() {
+    seagulls.push({
+        x: W + 30, y: 15 + Math.random() * 50, w: 32, h: 18, speed: 1.5 + Math.random() * 1.5,
+        hp: 1, poopTimer: 120 + Math.random() * 200, wingFrame: 0, dead: false
+    });
+}
+function drawSeagull(s) {
+    const x = Math.round(s.x), y = Math.round(s.y);
+    const wf = Math.sin(s.wingFrame * 0.2) * 8;
+    // Body
+    ctx.fillStyle = '#eee'; ctx.fillRect(x + 8, y + 8, 18, 8);
+    ctx.fillStyle = '#ddd'; ctx.fillRect(x + 6, y + 10, 4, 4); // tail
+    // Head
+    ctx.fillStyle = '#fff'; ctx.fillRect(x + 24, y + 6, 8, 8);
+    ctx.fillStyle = '#111'; ctx.fillRect(x + 28, y + 8, 3, 2); // eye
+    ctx.fillStyle = '#ee8800'; ctx.fillRect(x + 30, y + 10, 4, 2); // beak
+    // Wings
+    ctx.fillStyle = '#ccc';
+    ctx.fillRect(x + 10, y + 4 - Math.abs(wf), 14, 4);
+    ctx.fillStyle = '#444';
+    ctx.fillRect(x + 8, y + 2 - Math.abs(wf), 4, 3); // wingtip
+}
+function drawPoopDrop(p) {
+    const x = Math.round(p.x), y = Math.round(p.y);
+    ctx.fillStyle = '#fff'; ctx.fillRect(x, y, 6, 8);
+    ctx.fillStyle = '#eee'; ctx.fillRect(x + 1, y + 1, 4, 5);
+    ctx.fillStyle = '#ddd'; ctx.fillRect(x + 2, y + 7, 3, 2);
+}
+// ── MANATEE ──
+function spawnManatee() {
+    manatees.push({
+        x: W + 40, y: groundY - 40 + Math.random() * 10, w: 60, h: 36, speed: 0.4 + Math.random() * 0.2,
+        hp: 2, laserTimer: 0, laserCooldown: 180 + Math.random() * 60, laserWarning: 0,
+        walkFrame: 0, dead: false, hitFlash: 0
+    });
+}
+function drawManatee(m) {
+    const x = Math.round(m.x), y = Math.round(m.y), b = Math.sin(m.walkFrame * 0.1) * 2;
+    if (m.hitFlash > 0 && Math.floor(m.hitFlash / 2) % 2) return;
+    // Body - large grey blobby shape
+    ctx.fillStyle = '#6a7a7a'; ctx.fillRect(x + 6, y + 10 + b, 48, 20);
+    ctx.fillStyle = '#7a8a8a'; ctx.fillRect(x + 10, y + 6 + b, 40, 8);
+    ctx.fillStyle = '#5a6a6a'; ctx.fillRect(x + 10, y + 26 + b, 40, 6);
+    // Head
+    ctx.fillStyle = '#7a8888'; ctx.fillRect(x, y + 10 + b, 12, 16);
+    ctx.fillStyle = '#6a7777'; ctx.fillRect(x - 4, y + 14 + b, 8, 10); // snout
+    // Eyes (laser eyes glow red when warning)
+    const eyeColor = m.laserWarning > 0 ? (Math.floor(m.laserWarning / 3) % 2 ? '#ff0000' : '#ff6600') : '#222';
+    ctx.fillStyle = eyeColor; ctx.fillRect(x + 2, y + 12 + b, 4, 4);
+    if (m.laserWarning > 0) { ctx.fillStyle = 'rgba(255,0,0,0.3)'; ctx.fillRect(x - 2, y + 10 + b, 10, 8); }
+    // Flippers
+    ctx.fillStyle = '#5a6a6a';
+    ctx.fillRect(x + 14, y + 28 + b, 10, 6);
+    ctx.fillRect(x + 36, y + 28 + b, 10, 6);
+    // Tail
+    ctx.fillStyle = '#6a7a7a'; ctx.fillRect(x + 50, y + 14 + b, 10, 12);
+    ctx.fillStyle = '#5a6a6a'; ctx.fillRect(x + 56, y + 10 + b, 8, 8); ctx.fillRect(x + 56, y + 22 + b, 8, 8);
+    // HP indicator
+    if (m.hp === 1) { ctx.fillStyle = '#ff4444'; ctx.fillRect(x + 20, y - 2, 20, 3); ctx.fillStyle = '#44ff44'; ctx.fillRect(x + 20, y - 2, 10, 3); }
+}
+function drawLaserBeam(l) {
+    ctx.globalAlpha = 0.8; ctx.fillStyle = '#ff0000'; ctx.fillRect(l.x, l.y, l.len, 4);
+    ctx.fillStyle = '#ff6600'; ctx.fillRect(l.x, l.y + 1, l.len, 2);
+    ctx.fillStyle = '#ffaa00'; ctx.fillRect(l.x, l.y + 1, l.len, 1);
+    ctx.globalAlpha = 0.3; ctx.fillStyle = '#ff0000'; ctx.fillRect(l.x, l.y - 3, l.len, 10);
     ctx.globalAlpha = 1;
 }
 
@@ -316,7 +402,9 @@ window.addEventListener('keydown', e => {
     if (e.key === 'Enter') {
         if (gameState === 'title') { initAudio(); gameState = 'charSelect'; }
         else if (gameState === 'gameover') startGame();
+        else if (gameState === 'scores') gameState = 'title';
     }
+    if ((e.key === 's' || e.key === 'S') && gameState === 'title') { gameState = 'scores'; }
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' ', 'q', 'w', 'Q', 'W'].includes(e.key)) e.preventDefault();
 });
 window.addEventListener('keyup', e => { keys[e.key] = false; });
@@ -324,23 +412,28 @@ window.addEventListener('keyup', e => { keys[e.key] = false; });
 // ── GAME INIT ──
 function startGame() {
     gameState = 'playing'; score = 0; wave = 0; comboCount = 0; comboTimer = 0;
-    player.x = 80; player.y = groundY - player.h; player.lives = 3; player.invincible = 0;
+    player.x = 80; player.y = groundY - player.h; player.lives = 3.0; player.invincible = 0;
     player.portPunch = 0; player.stbdPunch = 0;
     enemies = []; projectiles = []; powerups = []; bloodPools = []; particles = [];
+    seagulls = []; poopDrops = []; manatees = []; lasers = [];
+    seagullSpawnTimer = 200; manateeSpawnTimer = 300;
+    bgTheme = 0;
     nextWave(); if (!muted) startBGM();
 }
 function nextWave() {
-    wave++; turtlesToSpawn = 1 + wave * 2; turtlesRemaining = turtlesToSpawn;
-    spawnInterval = Math.max(50, 140 - wave * 6); spawnTimer = 60; gameState = 'waveIntro'; waveTimer = 90;
+    wave++; turtlesToSpawn = 3 + wave * 2; turtlesRemaining = turtlesToSpawn;
+    spawnInterval = Math.max(40, 120 - wave * 6); spawnTimer = 40; gameState = 'waveIntro'; waveTimer = 90;
+    bgTheme = (wave - 1) % BG_THEMES.length;
     playSFX('waveComplete');
     if (wave > 1 && Math.random() > 0.35) setTimeout(() => { powerups.push({ x: W + 20, y: groundY - 50 - Math.random() * 80, w: 18, h: 30, speed: 1.2 + Math.random() }); }, 2000 + Math.random() * 3000);
 }
 function rectsOverlap(a, b) { return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y; }
-function playerDamage() {
+function playerDamage(amount) {
     if (player.invincible > 0) return;
-    player.lives--; player.invincible = 90; shakeTimer = 15; shakeIntensity = 8; playSFX('hit');
+    amount = amount || 1;
+    player.lives -= amount; player.invincible = 90; shakeTimer = 15; shakeIntensity = 8; playSFX('hit');
     for (let i = 0; i < 12; i++) particles.push({ x: player.x + player.w / 2, y: player.y + player.h / 2, vx: (Math.random() - 0.5) * 6, vy: (Math.random() - 0.5) * 6, life: 15, color: '#ff4', size: 5, type: 'hit' });
-    if (player.lives <= 0) { gameState = 'enterInitials'; initialsInput = ''; stopBGM(); }
+    if (player.lives <= 0) { player.lives = 0; gameState = 'enterInitials'; initialsInput = ''; stopBGM(); }
 }
 function killTurtle(e) {
     if (e.dead) return; e.dead = true; turtlesRemaining--; score++; playSFX('punch');
@@ -355,7 +448,7 @@ function killTurtle(e) {
 function update() {
     if (gameState === 'waveIntro') { waveTimer--; if (waveTimer <= 0) gameState = 'playing'; return; }
     if (gameState !== 'playing') return;
-    if (hitStopTimer > 0) { hitStopTimer--; return; } // hit-stop freeze
+    if (hitStopTimer > 0) { hitStopTimer--; return; }
     // Movement
     let mx = 0, my = 0;
     if (keys['ArrowLeft']) mx -= 1; if (keys['ArrowRight']) mx += 1;
@@ -372,44 +465,121 @@ function update() {
     if (player.invincible > 0) player.invincible--;
     // Combo timer
     if (comboTimer > 0) comboTimer--; else comboCount = 0;
-    // Spawn
+    // Spawn turtles
     if (turtlesToSpawn > 0) { spawnTimer--; if (spawnTimer <= 0) { spawnTurtle(); turtlesToSpawn--; spawnTimer = spawnInterval + Math.random() * 40; } }
-    // Enemies
+    // Spawn seagulls sporadically
+    seagullSpawnTimer--; if (seagullSpawnTimer <= 0) { spawnSeagull(); seagullSpawnTimer = 250 + Math.random() * 350 - wave * 10; }
+    // Spawn manatees from wave 3+
+    if (wave >= 3) { manateeSpawnTimer--; if (manateeSpawnTimer <= 0) { spawnManatee(); manateeSpawnTimer = 400 + Math.random() * 300 - wave * 15; } }
+    // Active punching check
+    const pP = player.portPunch > player.punchDuration * 0.3 && player.portPunch < player.punchDuration * 0.8;
+    const pS = player.stbdPunch > player.punchDuration * 0.3 && player.stbdPunch < player.punchDuration * 0.8;
+    // Enemies (turtles) - multi-directional movement
     enemies.forEach(e => {
         if (e.dead) return; e.walkFrame++;
         const dx = player.x - e.x, dy = player.y + player.h - e.y - e.h;
-        if (e.attackType === 'shell' && Math.abs(dx) < 250 && Math.abs(dx) > 180) {
+        const distToPlayer = Math.sqrt(dx * dx + dy * dy);
+        // Close enough to attack?
+        if (e.attackType === 'shell' && distToPlayer < 280 && distToPlayer > 160) {
             e.attackTimer++; if (e.attackTimer >= e.attackCooldown) {
-                projectiles.push({ x: e.x - 5, y: e.y + 10, vx: -1.2, vy: 0, w: 16, h: 16, spin: 0 });
-                e.attackTimer = 0; e.attackCooldown = 180 + Math.random() * 80;
+                const ang = Math.atan2(player.y + player.h / 2 - e.y - e.h / 2, player.x + player.w / 2 - e.x - e.w / 2);
+                projectiles.push({ x: e.x + e.w / 2, y: e.y + e.h / 2, vx: Math.cos(ang) * 1.5, vy: Math.sin(ang) * 1.5, w: 16, h: 16, spin: 0 });
+                e.attackTimer = 0; e.attackCooldown = 160 + Math.random() * 80;
             }
-        } else if (e.attackType === 'bite' && Math.abs(dx) < 55 && Math.abs(dy) < 20) {
+        } else if (e.attackType === 'bite' && distToPlayer < 55) {
             e.biting++; if (e.biting === 15) playerDamage(); if (e.biting > 25) e.biting = 0;
-        } else { e.biting = 0; e.x -= e.speed; if (dy > 5) e.y += e.speed * 0.3; else if (dy < -5) e.y -= e.speed * 0.3; }
-        const pP = player.portPunch > player.punchDuration * 0.3 && player.portPunch < player.punchDuration * 0.8;
-        const pS = player.stbdPunch > player.punchDuration * 0.3 && player.stbdPunch < player.punchDuration * 0.8;
+        } else {
+            e.biting = 0;
+            // Move toward player from any direction
+            if (distToPlayer > 10) {
+                e.x += (dx / distToPlayer) * e.speed;
+                e.y += (dy / distToPlayer) * e.speed * 0.5;
+            }
+        }
+        e.y = Math.min(groundY - e.h, Math.max(-10, e.y));
         const eR = { x: e.x, y: e.y, w: e.w, h: e.h };
         if (pP && rectsOverlap(player.portArm, eR)) killTurtle(e);
         if (pS && rectsOverlap(player.stbdArm, eR)) killTurtle(e);
-        if (e.x < -60) { e.dead = true; turtlesRemaining--; }
+        if (e.x < -80 || e.x > W + 120 || e.y > H + 60) { e.dead = true; turtlesRemaining--; }
     });
+    // Seagulls
+    seagulls.forEach(s => {
+        if (s.dead) return; s.wingFrame++; s.x -= s.speed;
+        s.poopTimer--;
+        if (s.poopTimer <= 0 && s.x > 50 && s.x < W - 50) {
+            poopDrops.push({ x: s.x + 14, y: s.y + 16, vy: 2 + Math.random(), w: 6, h: 8 });
+            s.poopTimer = 150 + Math.random() * 200;
+        }
+        // Can be hit by player punch
+        const sR = { x: s.x, y: s.y, w: s.w, h: s.h };
+        if (pP && rectsOverlap(player.portArm, sR)) { s.dead = true; score += 2; playSFX('punch'); comboCount++; comboTimer = 120; }
+        if (pS && rectsOverlap(player.stbdArm, sR)) { s.dead = true; score += 2; playSFX('punch'); comboCount++; comboTimer = 120; }
+        if (s.x < -50) s.dead = true;
+    });
+    seagulls = seagulls.filter(s => !s.dead);
+    // Poop drops
+    poopDrops.forEach(p => {
+        p.y += p.vy;
+        if (player.invincible <= 0 && rectsOverlap({ x: player.x + 8, y: player.y + 4, w: player.w - 16, h: player.h - 4 }, { x: p.x, y: p.y, w: p.w, h: p.h })) {
+            playerDamage(0.5); p.y = H + 100;
+            particles.push({ x: p.x, y: p.y, vx: 0, vy: 0, life: 30, color: '#fff', size: 6, type: 'gore' });
+        }
+    });
+    poopDrops = poopDrops.filter(p => p.y < H + 10);
+    // Manatees
+    manatees.forEach(m => {
+        if (m.dead) return; m.walkFrame++;
+        if (m.hitFlash > 0) m.hitFlash--;
+        // Move toward player slowly
+        const mdx = player.x - m.x, mdy = player.y - m.y;
+        const mdist = Math.sqrt(mdx * mdx + mdy * mdy);
+        if (mdist > 80) { m.x += (mdx / mdist) * m.speed; m.y += (mdy / mdist) * m.speed * 0.3; }
+        m.y = Math.min(groundY - m.h, Math.max(40, m.y));
+        // Laser logic
+        m.laserTimer++;
+        if (m.laserTimer > m.laserCooldown - 45 && m.laserWarning === 0) m.laserWarning = 45; // telegraph
+        if (m.laserWarning > 0) m.laserWarning--;
+        if (m.laserTimer >= m.laserCooldown) {
+            // Fire laser toward player
+            const lx = m.x - 4, ly = m.y + 14, lLen = -(m.x + 10);
+            lasers.push({ x: 0, y: ly, len: m.x, life: 12 });
+            if (player.invincible <= 0 && player.y + player.h > ly - 4 && player.y < ly + 8 && player.x < m.x) {
+                playerDamage(1);
+            }
+            m.laserTimer = 0; m.laserCooldown = 180 + Math.random() * 60;
+            shakeTimer = 6; shakeIntensity = 4; playSFX('hit');
+        }
+        // Can be hit by player punch
+        const mR = { x: m.x, y: m.y, w: m.w, h: m.h };
+        if (pP && rectsOverlap(player.portArm, mR)) { m.hp--; m.hitFlash = 12; playSFX('punch'); shakeTimer = 5; shakeIntensity = 3; }
+        if (pS && rectsOverlap(player.stbdArm, mR)) { m.hp--; m.hitFlash = 12; playSFX('punch'); shakeTimer = 5; shakeIntensity = 3; }
+        if (m.hp <= 0) {
+            m.dead = true; score += 3; comboCount++; comboTimer = 120;
+            bloodPools.push({ x: m.x + m.w / 2, y: groundY, size: 16 + Math.random() * 10, life: 500 });
+            for (let i = 0; i < 16; i++) particles.push({ x: m.x + m.w / 2, y: m.y + m.h / 2, vx: (Math.random() - 0.5) * 8, vy: -2 - Math.random() * 5, life: 25, color: ['#6a7a7a', '#ff4', '#f80', '#c00'][Math.floor(Math.random() * 4)], size: 4 + Math.random() * 5, type: 'gore' });
+        }
+        if (m.x < -80) m.dead = true;
+    });
+    manatees = manatees.filter(m => !m.dead);
+    // Lasers decay
+    lasers.forEach(l => l.life--); lasers = lasers.filter(l => l.life > 0);
     // Projectiles
     projectiles.forEach(p => {
-        p.x += p.vx; p.spin++;
+        p.x += p.vx; p.y += (p.vy || 0); p.spin++;
         if (player.invincible <= 0 && rectsOverlap({ x: player.x + 8, y: player.y + 8, w: player.w - 16, h: player.h - 8 }, { x: p.x, y: p.y, w: p.w, h: p.h })) { playerDamage(); p.x = -100; }
     });
-    projectiles = projectiles.filter(p => p.x > -50 && p.x < W + 50);
+    projectiles = projectiles.filter(p => p.x > -50 && p.x < W + 50 && p.y > -50 && p.y < H + 50);
     // Powerups
     powerups.forEach(pw => {
         pw.x -= pw.speed;
         if (rectsOverlap({ x: player.x, y: player.y, w: player.w, h: player.h }, { x: pw.x, y: pw.y, w: pw.w, h: pw.h })) {
-            if (player.lives < 3) player.lives++; else score += 50; playSFX('wrench'); pw.x = -200;
+            if (player.lives < 3) player.lives = Math.min(3, player.lives + 1); else score += 50; playSFX('wrench'); pw.x = -200;
             for (let i = 0; i < 12; i++) particles.push({ x: pw.x + 9, y: pw.y + 15, vx: (Math.random() - 0.5) * 4, vy: (Math.random() - 0.5) * 4, life: 20 + Math.random() * 10, color: '#ff0', size: 4, type: 'sparkle' });
         }
     });
     powerups = powerups.filter(pw => pw.x > -100);
     enemies = enemies.filter(e => !e.dead);
-    if (turtlesRemaining <= 0 && enemies.length === 0 && turtlesToSpawn <= 0) nextWave();
+    if (turtlesRemaining <= 0 && enemies.length === 0 && turtlesToSpawn <= 0 && manatees.length === 0) nextWave();
     bloodPools.forEach(b => { b.life--; }); bloodPools = bloodPools.filter(b => b.life > 0);
     particles.forEach(p => { p.x += p.vx; p.y += p.vy; p.life--; if (p.type === 'smoke') { p.size *= 1.02; p.vy -= 0.01; } if (p.type === 'gore') p.vy += 0.2; });
     particles = particles.filter(p => p.life > 0);
@@ -417,37 +587,74 @@ function update() {
 }
 
 // ── DRAW GAMEPLAY ──
+function drawBackground(t) {
+    const th = BG_THEMES[t] || BG_THEMES[0];
+    const sg = ctx.createLinearGradient(0, 0, 0, groundY); sg.addColorStop(0, th.sky1); sg.addColorStop(0.5, th.sky2); sg.addColorStop(1, th.sky3);
+    ctx.fillStyle = sg; ctx.fillRect(0, 0, W, groundY);
+    ctx.fillStyle = th.water; ctx.fillRect(0, groundY - 30, W, 30);
+    for (let wx = 0; wx < W; wx += 20) { const wy = Math.sin((wx + Date.now() * 0.002) * 0.1) * 3; ctx.fillStyle = th.waveC; ctx.fillRect(wx, groundY - 25 + wy, 14, 3); }
+    ctx.fillStyle = th.ground; ctx.fillRect(0, groundY, W, H - groundY);
+    ctx.fillStyle = th.groundL; for (let gx = 0; gx < W; gx += 40) { ctx.fillRect(gx, groundY, 38, 3); ctx.fillRect(gx + 5, groundY + 15, 30, 2); }
+    ctx.fillStyle = th.groundD; for (let gx = 0; gx < W; gx += 40) ctx.fillRect(gx + 39, groundY, 2, H - groundY);
+    // Theme-specific decorations
+    if (t === 0) { // Dock
+        ctx.fillStyle = '#1a1a3a'; ctx.fillRect(650, groundY - 120, 8, 120); ctx.fillRect(630, groundY - 120, 48, 6);
+        ctx.fillRect(710, groundY - 90, 6, 90); ctx.fillRect(690, groundY - 90, 36, 5);
+        ctx.fillStyle = '#3a3a2a'; ctx.fillRect(100, groundY - 60, 6, 60); ctx.fillRect(200, groundY - 50, 6, 50);
+    } else if (t === 1) { // Beach
+        ctx.fillStyle = '#4a8a2a'; ctx.fillRect(700, groundY - 100, 8, 100); // palm trunk
+        ctx.fillStyle = '#3a7a1a'; ctx.fillRect(680, groundY - 105, 50, 12); ctx.fillRect(690, groundY - 115, 35, 12); // fronds
+        ctx.fillStyle = '#eeddcc'; for (let i = 0; i < 5; i++) ctx.fillRect(50 + i * 150, groundY + 5, 8, 4); // shells
+    } else if (t === 2) { // Construction
+        ctx.fillStyle = '#555'; ctx.fillRect(600, groundY - 140, 10, 140); ctx.fillRect(580, groundY - 145, 50, 8); // crane
+        ctx.fillStyle = '#ff0'; ctx.fillRect(150, groundY - 30, 60, 30); ctx.fillStyle = '#cc0'; ctx.fillRect(155, groundY - 25, 50, 20); // equipment
+        ctx.fillStyle = '#888'; ctx.fillRect(750, groundY - 80, 6, 80); // piling
+    } else { // Open Water
+        ctx.fillStyle = '#cc3322'; ctx.fillRect(120, groundY - 25, 4, 25); ctx.fillRect(116, groundY - 28, 12, 6); // buoy
+        ctx.fillStyle = '#cc3322'; ctx.fillRect(500, groundY - 20, 4, 20); ctx.fillRect(496, groundY - 23, 12, 6); // buoy
+        ctx.fillStyle = '#334'; ctx.fillRect(680, groundY - 60, 40, 15); ctx.fillRect(700, groundY - 75, 6, 20); // distant ship
+    }
+}
 function draw() {
     ctx.save();
     if (shakeTimer > 0) { ctx.translate((Math.random() - 0.5) * shakeIntensity, (Math.random() - 0.5) * shakeIntensity); }
-    // Background
-    const sg = ctx.createLinearGradient(0, 0, 0, groundY); sg.addColorStop(0, '#1a1a3f'); sg.addColorStop(0.5, '#2a2a5f'); sg.addColorStop(1, '#3a4a7f');
-    ctx.fillStyle = sg; ctx.fillRect(0, 0, W, groundY);
-    ctx.fillStyle = '#2a4a8f'; ctx.fillRect(0, groundY - 30, W, 30);
-    for (let wx = 0; wx < W; wx += 20) { const wy = Math.sin((wx + Date.now() * 0.002) * 0.1) * 3; ctx.fillStyle = '#3a5a9f'; ctx.fillRect(wx, groundY - 25 + wy, 14, 3); }
-    ctx.fillStyle = '#5a4a3a'; ctx.fillRect(0, groundY, W, H - groundY);
-    ctx.fillStyle = '#6a5a4a'; for (let gx = 0; gx < W; gx += 40) { ctx.fillRect(gx, groundY, 38, 3); ctx.fillRect(gx + 5, groundY + 15, 30, 2); }
-    ctx.fillStyle = '#4a3a2a'; for (let gx = 0; gx < W; gx += 40) ctx.fillRect(gx + 39, groundY, 2, H - groundY);
-    ctx.fillStyle = '#1a1a3a'; ctx.fillRect(650, groundY - 120, 8, 120); ctx.fillRect(630, groundY - 120, 48, 6); ctx.fillRect(710, groundY - 90, 6, 90); ctx.fillRect(690, groundY - 90, 36, 5);
+    drawBackground(bgTheme);
     bloodPools.forEach(bp => drawBloodPool(bp));
     particles.forEach(p => { if (p.type === 'smoke') { ctx.globalAlpha = p.life / 40; ctx.fillStyle = p.color; ctx.fillRect(p.x, p.y, p.size, p.size); ctx.globalAlpha = 1; } });
     powerups.forEach(pw => drawWrench(pw));
     enemies.forEach(e => { if (!e.dead) drawTurtle(e); });
+    manatees.forEach(m => { if (!m.dead) drawManatee(m); });
     projectiles.forEach(p => drawShellProjectile(p));
     drawDredge(player);
+    seagulls.forEach(s => { if (!s.dead) drawSeagull(s); });
+    poopDrops.forEach(p => drawPoopDrop(p));
+    lasers.forEach(l => drawLaserBeam(l));
     particles.forEach(p => { if (p.type !== 'smoke') { ctx.globalAlpha = p.life / 30; ctx.fillStyle = p.color; if (p.type === 'sparkle') { ctx.fillRect(p.x - 1, p.y, 3, 1); ctx.fillRect(p.x, p.y - 1, 1, 3); } else { ctx.fillRect(p.x, p.y, p.size, p.size); } ctx.globalAlpha = 1; } });
     // Flash
     if (flashTimer > 0) { ctx.globalAlpha = flashTimer * 0.15; ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; }
-    // HUD
-    for (let i = 0; i < 3; i++) drawHardhat(12 + i * 32, 12, i < player.lives);
+    // HUD - half-heart support
+    for (let i = 0; i < 3; i++) {
+        const full = player.lives >= i + 1;
+        const half = !full && player.lives > i && player.lives < i + 1;
+        drawHardhat(12 + i * 32, 12, full, half);
+    }
     drawSkeletonTurtle(W - 110, 10, 1.3); ctx.fillStyle = '#fff'; ctx.font = '16px "Press Start 2P",monospace'; ctx.textAlign = 'left'; ctx.fillText('× ' + score, W - 68, 30);
-    ctx.fillStyle = 'rgba(255,255,255,0.3)'; ctx.font = '10px "Press Start 2P",monospace'; ctx.textAlign = 'center'; ctx.fillText('WAVE ' + wave, W / 2, 22);
+    ctx.fillStyle = 'rgba(255,255,255,0.3)'; ctx.font = '10px "Press Start 2P",monospace'; ctx.textAlign = 'center';
+    ctx.fillText('WAVE ' + wave + ' — ' + BG_THEMES[bgTheme].name, W / 2, 22);
     // Combo
     if (comboCount > 1) { ctx.fillStyle = '#ff0'; ctx.font = (12 + comboCount) + 'px "Press Start 2P",monospace'; ctx.textAlign = 'center'; ctx.globalAlpha = Math.min(1, comboTimer / 30); ctx.fillText('×' + comboCount + ' COMBO!', W / 2, 70); ctx.globalAlpha = 1; }
     // GO arrow
     if (enemies.length === 0 && turtlesToSpawn > 0) { const ga = Math.sin(Date.now() * 0.005) * 0.3 + 0.7; ctx.globalAlpha = ga; ctx.fillStyle = '#ff0'; ctx.font = '14px "Press Start 2P",monospace'; ctx.textAlign = 'center'; ctx.fillText('GO →', W - 60, H / 2); ctx.globalAlpha = 1; }
     // Wave intro
-    if (gameState === 'waveIntro') { ctx.fillStyle = 'rgba(0,0,0,0.4)'; ctx.fillRect(0, 0, W, H); ctx.fillStyle = '#ff0'; ctx.font = '28px "Press Start 2P",monospace'; ctx.textAlign = 'center'; ctx.fillText('WAVE ' + wave, W / 2, H / 2 - 10); ctx.fillStyle = '#fff'; ctx.font = '12px "Press Start 2P",monospace'; ctx.fillText((1 + wave * 2) + ' turtles incoming!', W / 2, H / 2 + 25); }
+    if (gameState === 'waveIntro') {
+        ctx.fillStyle = 'rgba(0,0,0,0.4)'; ctx.fillRect(0, 0, W, H);
+        ctx.fillStyle = '#ff0'; ctx.font = '28px "Press Start 2P",monospace'; ctx.textAlign = 'center';
+        ctx.fillText('WAVE ' + wave, W / 2, H / 2 - 20);
+        ctx.fillStyle = '#6af'; ctx.font = '10px "Press Start 2P",monospace';
+        ctx.fillText(BG_THEMES[bgTheme].name, W / 2, H / 2 + 5);
+        ctx.fillStyle = '#fff'; ctx.font = '10px "Press Start 2P",monospace';
+        ctx.fillText((3 + wave * 2) + ' enemies incoming!', W / 2, H / 2 + 30);
+    }
     // Controls hint
     if (wave === 1 && gameState === 'playing') { ctx.globalAlpha = Math.max(0, 1 - score * 0.15); ctx.fillStyle = '#aaa'; ctx.font = '8px "Press Start 2P",monospace'; ctx.textAlign = 'center'; ctx.fillText('← → ↑ ↓ MOVE    Q/W = ATTACK', W / 2, H - 15); ctx.globalAlpha = 1; }
     ctx.restore();
@@ -503,8 +710,23 @@ function drawTitle() {
     }
     ctx.fillStyle = '#ff4444'; ctx.font = '14px "Press Start 2P",monospace'; ctx.fillText('VS', W / 2, 330);
     const tx = W / 2 - 20, ty = 340; dpr(tx + 6, ty + 6, 27, 21, '#2a7a2a'); dpr(tx + 9, ty + 3, 21, 6, '#3a9a3a'); dpr(tx - 3, ty + 9, 12, 12, '#5a9a3a'); dpr(tx, ty + 12, 4, 4, '#111'); dpr(tx + 9, ty + 27, 6, 6, '#5a9a3a'); dpr(tx + 24, ty + 27, 6, 6, '#5a9a3a');
-    if (Math.floor(now / 500) % 2) { ctx.fillStyle = '#fff'; ctx.font = '12px "Press Start 2P",monospace'; ctx.textAlign = 'center'; ctx.fillText('PRESS ENTER', W / 2, 430); }
-    ctx.fillStyle = '#667'; ctx.font = '8px "Press Start 2P",monospace'; ctx.fillText('ARROWS: MOVE   Q/W: ATTACK', W / 2, 470);
+    if (Math.floor(now / 500) % 2) { ctx.fillStyle = '#fff'; ctx.font = '12px "Press Start 2P",monospace'; ctx.textAlign = 'center'; ctx.fillText('PRESS ENTER', W / 2, 420); }
+    ctx.fillStyle = '#667'; ctx.font = '8px "Press Start 2P",monospace'; ctx.fillText('ARROWS: MOVE   Q/W: ATTACK', W / 2, 455);
+    ctx.fillStyle = '#6af'; ctx.font = '8px "Press Start 2P",monospace'; ctx.fillText('S = HIGH SCORES', W / 2, 475);
+}
+
+// ── SCORES SCREEN ──
+function drawScores() {
+    const sg = ctx.createLinearGradient(0, 0, 0, H); sg.addColorStop(0, '#0a0a2f'); sg.addColorStop(1, '#1a2a5f');
+    ctx.fillStyle = sg; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#ff6600'; ctx.font = '22px "Press Start 2P",monospace'; ctx.textAlign = 'center'; ctx.fillText('═══ HIGH SCORES ═══', W / 2, 60);
+    if (highScores.length === 0) { ctx.fillStyle = '#666'; ctx.font = '11px "Press Start 2P",monospace'; ctx.fillText('NO SCORES YET', W / 2, 150); }
+    else highScores.slice(0, MAX_SCORES).forEach((hs, i) => {
+        ctx.fillStyle = i === 0 ? '#ff0' : (i < 3 ? '#ffa' : '#aaa');
+        ctx.font = '11px "Press Start 2P",monospace'; ctx.textAlign = 'center';
+        ctx.fillText((i + 1) + '. ' + hs.name + '    ' + String(hs.score).padStart(4, ' ') + ' KILLS   W' + hs.wave, W / 2, 110 + i * 32);
+    });
+    if (Math.floor(Date.now() / 500) % 2) { ctx.fillStyle = '#fff'; ctx.font = '10px "Press Start 2P",monospace'; ctx.fillText('PRESS ENTER TO GO BACK', W / 2, H - 40); }
 }
 
 // ── GAME OVER ──
@@ -537,6 +759,7 @@ function drawGameOver() {
 // ── GAME LOOP ──
 function gameLoop() {
     if (gameState === 'title') drawTitle();
+    else if (gameState === 'scores') drawScores();
     else if (gameState === 'charSelect') drawCharSelect();
     else { update(); draw(); if (gameState === 'gameover' || gameState === 'enterInitials') drawGameOver(); }
     requestAnimationFrame(gameLoop);
